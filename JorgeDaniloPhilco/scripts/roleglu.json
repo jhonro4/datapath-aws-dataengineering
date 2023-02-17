@@ -1,0 +1,21 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+      {
+          "Action": [
+              "Glue:*",
+              "s3:*",
+              "logs:CreateLogGroup",
+              "logs:CreateLogStream",
+              "logs:PutLogEvents"
+          ],
+          "Resource": [
+              "*",
+              "arn:aws:s3:::bsadatalake-raw-558999408949/*",
+              "arn:aws:s3:::bsadatalake-stage-558999408949",
+              "arn:aws:s3:::bsadatalake-stage-558999408949/*"
+          ],
+          "Effect": "Allow"
+      }
+  ]
+}

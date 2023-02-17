@@ -1,0 +1,480 @@
+Description: Creando recursos Workshop Glue
+Parameters:
+
+  pS3BucketRaw:
+    Description: Nombre del bucket en S3
+    Type: String
+    Default: bsadatalake-raw
+    
+  pS3BucketStage:
+    Description: Nombre del bucket en S3
+    Type: String
+    Default: bsadatalake-stage
+    
+  pS3BucketAnalytics:
+    Description: Nombre del bucket en S3
+    Type: String
+    Default: bsadatalake-analytics
+    
+  pS3BucketAthena:
+    Description: Nombre del bucket en S3
+    Type: String
+    Default: athena-results1208
+    
+  pGlueDatabaseRaw:
+    Description: Nombre de la base de datos Raw en Glue
+    Type: String
+    Default: database-bsa-raw
+    
+  pGlueDatabaseStage:
+    Description: Nombre de la base de datos Stage en Glue
+    Type: String
+    Default: database-bsa-stage
+    
+  pGlueDatabaseAnalytics:
+    Description: Nombre de la base de datos Analytics en Glue
+    Type: String
+    Default: database-bsa-analytics
+    
+  pRoleGlue:
+    Description: Nombre del rol para los crawler y job en Glue
+    Type: String
+    Default: RoleGlue
+    
+Resources:
+
+  BucketRaw:
+    Type: AWS::S3::Bucket
+    DependsOn:
+      - rProcessingLambdaPermission
+    Properties:
+      BucketName: !Join [ -, [ !Ref pS3BucketRaw, !Ref AWS::AccountId ] ]
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt rFunctionLambda.Arn
+            Filter:
+              S3Key:
+                Rules:
+                - Name: prefix
+                  Value: data/files/
+                  
+  BucketStage:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Join [ -, [ !Ref pS3BucketStage, !Ref AWS::AccountId ] ]
+      
+  BucketAnalytics:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Join [ -, [ !Ref pS3BucketAnalytics, !Ref AWS::AccountId ] ]
+      
+  BucketAthena:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Join [ -, [ !Ref pS3BucketAthena, !Ref AWS::AccountId ] ]
+      
+  rProcessingLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref rFunctionLambda
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub 'arn:aws:s3:::${pS3BucketRaw}-${AWS::AccountId}'
+      SourceAccount: !Ref AWS::AccountId
+      
+  ProcessingLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Policies:
+        - PolicyName: allowLogging
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+              - logs:*
+              Resource: arn:aws:logs:*:*:*
+        - PolicyName: getAndDeleteObjects
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+              - glue:StartCrawler
+              - s3:GetObject
+              Resource:  
+              - !Sub 'arn:aws:s3:::${pS3BucketRaw}-${AWS::AccountId}/*'
+              - '*'
+              
+  rFunctionLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: ExecuteStartCrawler
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import sys, os
+          
+          glue = boto3.client("glue")
+          
+          def lambda_handler(event, context):
+              
+              s3_bucket = event['Records'][0]['s3']['bucket']['name']
+              s3_object = event['Records'][0]['s3']['object']['key']
+              
+              parse_id_source = s3_object.split('/')[2]
+              if parse_id_source == 'CLIENTE_PERFIL':
+                glue.start_crawler(Name = 'RAW_CLIENTE_PERFIL')
+              elif parse_id_source == 'PRODUCTOS':
+                glue.start_crawler(Name = 'RAW_PRODUCTOS') 
+              elif parse_id_source == 'PRESTAMOS':
+                glue.start_crawler(Name = 'RAW_PRESTAMOS')
+              elif parse_id_source == 'RENTABILIDAD':
+                glue.start_crawler(Name = 'RAW_RENTABILIDAD')
+              elif parse_id_source == 'ESTADO_CIVIL':
+                glue.start_crawler(Name = 'RAW_ESTADO_CIVIL')
+              elif parse_id_source == 'SEGMENTO':
+                glue.start_crawler(Name = 'RAW_SEGMENTO')
+              elif parse_id_source == 'AGENCIA':
+                glue.start_crawler(Name = 'RAW_AGENCIA')
+              elif parse_id_source == 'TIPO_PRESTAMO':
+                glue.start_crawler(Name = 'RAW_TIPO_PRESTAMO')
+              elif parse_id_source == 'UBIGEO':
+                glue.start_crawler(Name = 'RAW_UBIGEO')
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps('Crawler en ejecución')
+              }
+
+      Handler: index.lambda_handler
+      Role: !GetAtt ProcessingLambdaExecutionRole.Arn
+      Runtime: python3.7
+      MemorySize: 128
+      Timeout: 300
+      
+  rRoleGlue:
+    Type: AWS::IAM::Role
+    DependsOn: BucketRaw
+    Properties:
+      RoleName: !Ref pRoleGlue
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "glue.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "root"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Action: 
+                - Glue:*
+                - s3:*
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+                Resource: 
+                - "*"
+                - !Sub 'arn:aws:s3:::${BucketRaw}/*'
+                - !Sub 'arn:aws:s3:::${BucketStage}'
+                - !Sub 'arn:aws:s3:::${BucketStage}/*'
+                
+  rGlueDatabaseRaw:
+    Type: "AWS::Glue::Database"
+    DependsOn: BucketRaw
+    Properties:
+      DatabaseInput:
+        Description: "Base de datos de Glue - Raw"
+        Name: !Ref pGlueDatabaseRaw
+      CatalogId: !Ref AWS::AccountId
+      
+  rGlueDatabaseStage:
+    Type: "AWS::Glue::Database"
+    DependsOn: BucketRaw
+    Properties:
+      DatabaseInput:
+        Description: "Base de datos de Glue - Stage"
+        Name: !Ref pGlueDatabaseStage
+      CatalogId: !Ref AWS::AccountId
+      
+  rGlueDatabaseAnalytics:
+    Type: "AWS::Glue::Database"
+    DependsOn: BucketAnalytics
+    Properties:
+      DatabaseInput:
+        Description: "Base de datos de Glue - Analytics"
+        Name: !Ref pGlueDatabaseAnalytics
+      CatalogId: !Ref AWS::AccountId
+      
+  rCrawlerRAWCLIENTEPERFIL:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: "RAW_CLIENTE_PERFIL"
+      Description: Crawler que genera una tabla en formato CSV en el esquema RAW
+      Role: !GetAtt rRoleGlue.Arn
+      DatabaseName: !Ref rGlueDatabaseRaw
+      Targets:
+        S3Targets:
+          - Path: !Join [ "/", [ !Join [ "-", [ !Ref pS3BucketRaw, !Ref AWS::AccountId ] ] , "data", "files", "CLIENTE_PERFIL" ] ] 
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "LOG"
+        
+  rCrawlerRAWPRODUCTOS:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: "RAW_PRODUCTOS"
+      Description: Crawler que genera una tabla en formato CSV en el esquema RAW
+      Role: !GetAtt rRoleGlue.Arn
+      DatabaseName: !Ref rGlueDatabaseRaw
+      Targets:
+        S3Targets:
+          - Path: !Join [ "/", [ !Join [ "-", [ !Ref pS3BucketRaw, !Ref AWS::AccountId ] ] , "data", "files", "PRODUCTOS" ] ] 
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "LOG"
+
+  rCrawlerRAWPRESTAMOS:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: "RAW_PRESTAMOS"
+      Description: Crawler que genera una tabla en formato CSV en el esquema RAW
+      Role: !GetAtt rRoleGlue.Arn
+      DatabaseName: !Ref rGlueDatabaseRaw
+      Targets:
+        S3Targets:
+          - Path: !Join [ "/", [ !Join [ "-", [ !Ref pS3BucketRaw, !Ref AWS::AccountId ] ] , "data", "files", "PRESTAMOS" ] ] 
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "LOG"
+
+  rCrawlerRAWRENTABILIDAD:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: "RAW_RENTABILIDAD"
+      Description: Crawler que genera una tabla en formato CSV en el esquema RAW
+      Role: !GetAtt rRoleGlue.Arn
+      DatabaseName: !Ref rGlueDatabaseRaw
+      Targets:
+        S3Targets:
+          - Path: !Join [ "/", [ !Join [ "-", [ !Ref pS3BucketRaw, !Ref AWS::AccountId ] ] , "data", "files", "RENTABILIDAD" ] ] 
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "LOG"        
+
+  rCrawlerRAWAGENCIA:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: "RAW_AGENCIA"
+      Description: Crawler que genera una tabla en formato CSV en el esquema RAW
+      Role: !GetAtt rRoleGlue.Arn
+      DatabaseName: !Ref rGlueDatabaseRaw
+      Targets:
+        S3Targets:
+          - Path: !Join [ "/", [ !Join [ "-", [ !Ref pS3BucketRaw, !Ref AWS::AccountId ] ] , "data", "files", "AGENCIA" ] ] 
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "LOG"
+
+  rCrawlerRAWSEGMENTO:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: "RAW_SEGMENTO"
+      Description: Crawler que genera una tabla en formato CSV en el esquema RAW
+      Role: !GetAtt rRoleGlue.Arn
+      DatabaseName: !Ref rGlueDatabaseRaw
+      Targets:
+        S3Targets:
+          - Path: !Join [ "/", [ !Join [ "-", [ !Ref pS3BucketRaw, !Ref AWS::AccountId ] ] , "data", "files", "SEGMENTO" ] ] 
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "LOG"
+
+  rCrawlerRAWTIPOPRESTAMO:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: "RAW_TIPO_PRESTAMO"
+      Description: Crawler que genera una tabla en formato CSV en el esquema RAW
+      Role: !GetAtt rRoleGlue.Arn
+      DatabaseName: !Ref rGlueDatabaseRaw
+      Targets:
+        S3Targets:
+          - Path: !Join [ "/", [ !Join [ "-", [ !Ref pS3BucketRaw, !Ref AWS::AccountId ] ] , "data", "files", "TIPO_PRESTAMO" ] ] 
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "LOG"
+
+  rCrawlerRAWUBIGEO:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: "RAW_UBIGEO"
+      Description: Crawler que genera una tabla en formato CSV en el esquema RAW
+      Role: !GetAtt rRoleGlue.Arn
+      DatabaseName: !Ref rGlueDatabaseRaw
+      Targets:
+        S3Targets:
+          - Path: !Join [ "/", [ !Join [ "-", [ !Ref pS3BucketRaw, !Ref AWS::AccountId ] ] , "data", "files", "UBIGEO" ] ] 
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "LOG"
+
+  rCrawlerRAWESTADOCIVIL:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: "RAW_ESTADO_CIVIL"
+      Description: Crawler que genera una tabla en formato CSV en el esquema RAW
+      Role: !GetAtt rRoleGlue.Arn
+      DatabaseName: !Ref rGlueDatabaseRaw
+      Targets:
+        S3Targets:
+          - Path: !Join [ "/", [ !Join [ "-", [ !Ref pS3BucketRaw, !Ref AWS::AccountId ] ] , "data", "files", "ESTADO_CIVIL" ] ] 
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "LOG"
+
+  rCrawlerStageCLIENTEPERFIL:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: "Stage_CLIENTE_PERFIL"
+      Description: Crawler que genera una tabla en formato PARQUET en el esquema STAGE
+      Role: !GetAtt rRoleGlue.Arn
+      DatabaseName: !Ref rGlueDatabaseStage
+      Targets:
+        S3Targets:
+          - Path: !Join [ "/", [ !Join [ "-", [ !Ref pS3BucketStage, !Ref AWS::AccountId ] ] , "data", "files", "CLIENTE_PERFIL" ] ] 
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "LOG"
+        
+  rCrawlerStagePRODUCTOS:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: "Stage_PRODUCTOS"
+      Description: Crawler que genera una tabla en formato CSV en el esquema RAW
+      Role: !GetAtt rRoleGlue.Arn
+      DatabaseName: !Ref rGlueDatabaseStage
+      Targets:
+        S3Targets:
+          - Path: !Join [ "/", [ !Join [ "-", [ !Ref pS3BucketStage, !Ref AWS::AccountId ] ] , "data", "files", "PRODUCTOS" ] ] 
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "LOG"
+
+  rCrawlerStagePRESTAMOS:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: "Stage_PRESTAMOS"
+      Description: Crawler que genera una tabla en formato CSV en el esquema RAW
+      Role: !GetAtt rRoleGlue.Arn
+      DatabaseName: !Ref rGlueDatabaseStage
+      Targets:
+        S3Targets:
+          - Path: !Join [ "/", [ !Join [ "-", [ !Ref pS3BucketStage, !Ref AWS::AccountId ] ] , "data", "files", "PRESTAMOS" ] ] 
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "LOG"
+
+  rCrawlerStageRENTABILIDAD:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: "Stage_RENTABILIDAD"
+      Description: Crawler que genera una tabla en formato CSV en el esquema RAW
+      Role: !GetAtt rRoleGlue.Arn
+      DatabaseName: !Ref rGlueDatabaseStage
+      Targets:
+        S3Targets:
+          - Path: !Join [ "/", [ !Join [ "-", [ !Ref pS3BucketStage, !Ref AWS::AccountId ] ] , "data", "files", "RENTABILIDAD" ] ] 
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "LOG"       
+
+  rCrawlerStageAGENCIA:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: "Stage_AGENCIA"
+      Description: Crawler que genera una tabla en formato CSV en el esquema RAW
+      Role: !GetAtt rRoleGlue.Arn
+      DatabaseName: !Ref rGlueDatabaseStage
+      Targets:
+        S3Targets:
+          - Path: !Join [ "/", [ !Join [ "-", [ !Ref pS3BucketStage, !Ref AWS::AccountId ] ] , "data", "files", "AGENCIA" ] ] 
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "LOG"
+
+  rCrawlerStageSEGMENTO:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: "Stage_SEGMENTO"
+      Description: Crawler que genera una tabla en formato CSV en el esquema RAW
+      Role: !GetAtt rRoleGlue.Arn
+      DatabaseName: !Ref rGlueDatabaseStage
+      Targets:
+        S3Targets:
+          - Path: !Join [ "/", [ !Join [ "-", [ !Ref pS3BucketStage, !Ref AWS::AccountId ] ] , "data", "files", "SEGMENTO" ] ] 
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "LOG"
+
+  rCrawlerStageTIPOPRESTAMO:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: "Stage_TIPO_PRESTAMO"
+      Description: Crawler que genera una tabla en formato CSV en el esquema RAW
+      Role: !GetAtt rRoleGlue.Arn
+      DatabaseName: !Ref rGlueDatabaseStage
+      Targets:
+        S3Targets:
+          - Path: !Join [ "/", [ !Join [ "-", [ !Ref pS3BucketStage, !Ref AWS::AccountId ] ] , "data", "files", "TIPO_PRESTAMO" ] ] 
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "LOG"
+
+  rCrawlerStageUBIGEO:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: "Stage_UBIGEO"
+      Description: Crawler que genera una tabla en formato CSV en el esquema RAW
+      Role: !GetAtt rRoleGlue.Arn
+      DatabaseName: !Ref rGlueDatabaseStage
+      Targets:
+        S3Targets:
+          - Path: !Join [ "/", [ !Join [ "-", [ !Ref pS3BucketStage, !Ref AWS::AccountId ] ] , "data", "files", "UBIGEO" ] ] 
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "LOG"
+
+  rCrawlerStageESTADOCIVIL:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: "Stage_ESTADO_CIVIL"
+      Description: Crawler que genera una tabla en formato CSV en el esquema RAW
+      Role: !GetAtt rRoleGlue.Arn
+      DatabaseName: !Ref rGlueDatabaseStage
+      Targets:
+        S3Targets:
+          - Path: !Join [ "/", [ !Join [ "-", [ !Ref pS3BucketStage, !Ref AWS::AccountId ] ] , "data", "files", "ESTADO_CIVIL" ] ] 
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "LOG"

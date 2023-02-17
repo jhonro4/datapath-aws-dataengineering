@@ -1,0 +1,90 @@
+{
+  "Comment": "A description of my state machine",
+  "StartAt": "jobconvert1208",
+  "States": {
+    "jobconvert1208": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun",
+      "Parameters": {
+        "JobName": "jobconvert1208"
+      },
+      "Next": "Wait"
+    },
+    "Wait": {
+      "Type": "Wait",
+      "Seconds": 30,
+      "Next": "Parallel"
+    },
+    "Parallel": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "Stage_CLIENTE_PERFIL",
+          "States": {
+            "Stage_CLIENTE_PERFIL": {
+              "Type": "Task",
+              "End": true,
+              "Parameters": {
+                "Name": "Stage_CLIENTE_PERFIL"
+              },
+              "Resource": "arn:aws:states:::aws-sdk:glue:startCrawler"
+            }
+          }
+        },
+        {
+          "StartAt": "Stage_AGENCIA",
+          "States": {
+            "Stage_AGENCIA": {
+              "Type": "Task",
+              "Parameters": {
+                "Name": "Stage_AGENCIA"
+              },
+              "Resource": "arn:aws:states:::aws-sdk:glue:startCrawler",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "Stage_PRODUCTOS",
+          "States": {
+            "Stage_PRODUCTOS": {
+              "Type": "Task",
+              "Parameters": {
+                "Name": "Stage_PRODUCTOS"
+              },
+              "Resource": "arn:aws:states:::aws-sdk:glue:startCrawler",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "Stage_PRESTAMOS",
+          "States": {
+            "Stage_PRESTAMOS": {
+              "Type": "Task",
+              "End": true,
+              "Parameters": {
+                "Name": "Stage_PRESTAMOS"
+              },
+              "Resource": "arn:aws:states:::aws-sdk:glue:startCrawler"
+            }
+          }
+        }
+      ],
+      "Next": "Wait 2"
+    },
+    "Wait 2": {
+      "Type": "Wait",
+      "Seconds": 30,
+      "Next": "jobquery"
+    },
+    "jobquery": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun",
+      "Parameters": {
+        "JobName": "jobquery"
+      },
+      "End": true
+    }
+  }
+}
